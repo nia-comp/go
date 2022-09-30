@@ -5,6 +5,8 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"golang.org/x/crypto/bcrypt"
+	"encoding/hex"
+  "math/rand"
 )
 
 type REGISTER struct {
@@ -25,8 +27,14 @@ type User struct {
 }
 
 type SignIn struct {
-	email string
-	password string
+	EMAIL string `json:"email" binding:"required"`
+	PASSWORD string `json:"password" binding:"required"`
+}
+
+type Auth struct {
+	ID int
+	USER_ID int
+	TOKEN string
 }
 
 func HashPassword(password string) (string, error) {
@@ -37,6 +45,14 @@ func HashPassword(password string) (string, error) {
 func CheckPasswordHash(password, hash string) bool {
     err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
     return err == nil
+}
+
+func GenerateSecureToken(length int) string {
+    b := make([]byte, length)
+    if _, err := rand.Read(b); err != nil {
+        return ""
+    }
+    return hex.EncodeToString(b)
 }
 
 func main() {
@@ -64,17 +80,34 @@ func main() {
 
 	r.POST("/users/signin", func (c *gin.Context)  {
 		var signIn SignIn
-
+		var ath Auth
 		var result User
-		db.Model(User{EMAIL: signIn.email}).First(&result)
+		c.BindJSON(&signIn)
+
+		db.First(&result, "`users`.`email` = ?", signIn.EMAIL)
 		if result == (User{}) {
 			c.JSON(404, gin.H{"error": "email tidak ketemu"})
 		}
 
 		password := result.PASSWORD
-		if CheckPasswordHash(signIn.password, password) == true {
-			c.JSON(200, gin.H{"status": "berhasil"})
+
+		db.First(&ath, "user_id = ?", result.ID)
+		token := GenerateSecureToken(10)
+		if ath == (Auth{}) {
+			auth := Auth{USER_ID: result.ID, TOKEN: token}
+			db.Create(&auth)
+		} else {
+			ath.TOKEN = token
+			db.Save(&ath)
 		}
+
+		if CheckPasswordHash(signIn.PASSWORD, password) == true {
+			c.JSON(200, gin.H{"status": "berhasil", "token": token})
+		}
+	})
+
+	r.PUT("/users/update/image", func (c *gin.Context) {
+		
 	})
 	r.Run() // listen and serve on 0.0.0.0:8080
 }
