@@ -10,14 +10,9 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"github.com/gin-contrib/sessions"
+  gormsessions "github.com/gin-contrib/sessions/gorm"
 )
-
-type REGISTER struct {
-	USERNAME string `json:"username" binding:"required"`
-	EMAIL    string `json:"email" binding:"required"`
-	PASSWORD string `json:"password" binding:"required"`
-	PHOTO    string `json:"photo" binding:"required"`
-}
 
 type User struct {
 	ID       int
@@ -63,15 +58,21 @@ func GenerateSecureToken(length int) string {
 
 func main() {
 	db, err := gorm.Open(sqlite.Open("database.db"), &gorm.Config{})
+	if err != nil {
+    panic(err)
+  }
+	store := gormsessions.NewStore(db, true, []byte("secret"))
 	r := gin.Default()
+	r.Use(sessions.Sessions("mysession", store))
 
 	r.POST("/users/register", func(c *gin.Context) {
-		var register REGISTER
-		c.BindJSON(&register)
+		username := c.PostForm("username")
+		email := c.PostForm("email")
+		pwd := c.PostForm("password")
 
-		hashed, _ := HashPassword(register.PASSWORD)
+		hashed, _ := HashPassword(password)
 
-		user := User{USERNAME: register.USERNAME, EMAIL: register.EMAIL, PASSWORD: hashed, PHOTO: register.PHOTO}
+		user := User{USERNAME: username, EMAIL: email, PASSWORD: hashed, PHOTO: ""}
 		if err != nil {
         panic("failed to connect database")
     }
@@ -82,6 +83,7 @@ func main() {
 	r.POST("/users/signin", func (c *gin.Context)  {
 		email := c.PostForm("email")
 		pwd := c.PostForm("password")
+		session := sessions.Default(c)
 
 		var ath Auth
 		var result User
@@ -103,6 +105,9 @@ func main() {
 			ath.TOKEN = token
 			db.Save(&ath)
 		}
+
+		session.Set("token", token)
+		session.Save()
 
 		if CheckPasswordHash(pwd, password) == true {
 			c.JSON(200, gin.H{"status": "berhasil", "token": token})
@@ -138,6 +143,73 @@ func main() {
 		db.Create(&pt)
 
 		c.String(http.StatusOK, fmt.Sprintf("File %s uploaded successfully", file.Filename))
+	})
+
+	r.DELETE("/users/:userId", func (c *gin.Context) {
+		var user User
+		var auth Auth
+		session := sessions.Default(c)
+		user_id := c.Param("userId")
+
+		token := session.Get("token")
+		if token == nil {
+			c.JSON(401, gin.H{"status": "Unauthorized 1"})
+			return
+		}
+
+		db.First(&auth, "token = ?", token)
+		if auth == (Auth{}) {
+			c.JSON(401, gin.H{"status": "User unknown"})
+			return
+		}
+
+		db.First(&auth, "token = ?", token)
+		if auth == (Auth{}) {
+			c.JSON(401, gin.H{"status": "User unknown"})
+			return
+		}
+
+		db.First(&user, user_id)
+		if user == (User{}) {
+			c.JSON(401, gin.H{"status": "User unknown"})
+			return
+		}
+
+		if user.ID != auth.USER_ID {
+			c.JSON(401, gin.H{"status": "Unauthorized 1"})
+			return
+		}
+
+		db.DELETE(&User{}, user_id)
+		c.JSON(200, gin.H{"status": "Deleted"})
+	})
+
+	r.DELETE("/:imageId", func (c *gin.Context) {
+		var auth Auth
+		var photo Photo
+
+		session := sessions.Default(c)
+		token := session.Get("token")
+		if token == nil {
+			c.JSON(401, gin.H{"status": "Unauthorized 1"})
+			return
+		}
+
+		db.First(&auth, "token = ?", token)
+		if auth == (Auth{}) {
+			c.JSON(401, gin.H{"status": "User unknown"})
+			return
+		}
+
+		image_id := c.Param("imageId")
+		db.First(&photo, image_id)
+
+		if photo.USER_ID != auth.USER_ID {
+			c.JSON(401, gin.H{"status": "Unauthorized 2"})
+			return
+		}
+		db.Delete(&Photo{}, image_id)
+		c.JSON(200, gin.H{"status": "Deleted"})
 	})
 	r.Run() // listen and serve on 0.0.0.0:8080
 }
