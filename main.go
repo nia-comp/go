@@ -70,7 +70,7 @@ func main() {
 		email := c.PostForm("email")
 		pwd := c.PostForm("password")
 
-		hashed, _ := HashPassword(password)
+		hashed, _ := HashPassword(pwd)
 
 		user := User{USERNAME: username, EMAIL: email, PASSWORD: hashed, PHOTO: ""}
 		if err != nil {
@@ -180,7 +180,7 @@ func main() {
 			return
 		}
 
-		db.DELETE(&User{}, user_id)
+		db.Delete(&User{}, user_id)
 		c.JSON(200, gin.H{"status": "Deleted"})
 	})
 
